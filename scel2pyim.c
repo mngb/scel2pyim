@@ -30,6 +30,7 @@
 #define MAX_LINE_LENGTH 4096
 // 最长的输入条目，过长的将被过滤掉
 #define MAX_ITEM_LINE_LENGTH 128
+#define MAX_WORDS_NUM 4
 
 int is_directory(const char *path) {
     struct stat statbuf;
@@ -263,6 +264,10 @@ static void transfer_line_to_split_buf(struct word_split_buf* buf, const char* s
   const char* end_pos = s; // 指向最后的 word 字符，非 -
   
   buf->split_count = 0;
+  if (final_pos==NULL) {
+    final_pos = strchr(s, '\0');
+  }
+
   while( s != final_pos ) {
     if (*s == '-') {
       end_pos = s - 1;
@@ -273,10 +278,12 @@ static void transfer_line_to_split_buf(struct word_split_buf* buf, const char* s
     }
     s++;
   }
-  end_pos = s - 1;
-  memcpy(buf->words[buf->split_count], start_pos, end_pos - start_pos + 1);
-  buf->words[buf->split_count][end_pos - start_pos + 1] = 0;
-  buf->split_count += 1;
+  if ( s != first_pos) {
+    end_pos = s - 1;
+    memcpy(buf->words[buf->split_count], start_pos, end_pos - start_pos + 1);
+    buf->words[buf->split_count][end_pos - start_pos + 1] = 0;
+    buf->split_count += 1;
+  }
 }
     
 int compare(const void *a, const void *b) {
@@ -308,6 +315,19 @@ int compare(const void *a, const void *b) {
   return cmp_result;
 }
 
+void
+write_targets_to_file(const char** targets, int target_num, const char* cur_input_prefix, FILE* file)
+{
+  for(int j=0; j<target_num; j++) {
+    if (!strchr(targets[j], ' ')) { // target 中有空格的为不合法的 target
+      struct word_split_buf word_buf;
+      transfer_line_to_split_buf(&word_buf, cur_input_prefix);
+      if (word_buf.split_count > 0 && word_buf.split_count <= MAX_WORDS_NUM) {
+        fprintf(file, "%s %s\n", cur_input_prefix, targets[j]);
+      }
+    }
+  }
+}
 void sort_pyim_file(char* filename)
 {
     FILE *file = fopen(filename, "rb+");
@@ -370,11 +390,8 @@ void sort_pyim_file(char* filename)
       int prefix_len = split_pos - lines[i];
       if (memcmp(cur_input_prefix, lines[i], prefix_len)) {
         // write all targets
-        for(int j=0; j<target_num; j++) {
-          if (!strchr(targets[j], ' ')) { // target 中有空格的为不合法的 target
-            fprintf(file, "%s %s\n", cur_input_prefix, targets[j]);
-          }
-        }
+        write_targets_to_file(targets, target_num, cur_input_prefix, file);
+        
         target_num = 0;
         memcpy(cur_input_prefix, lines[i], prefix_len);
         cur_input_prefix[prefix_len] = '\0';
@@ -389,11 +406,17 @@ void sort_pyim_file(char* filename)
         }
         if (j==target_num) {
           // new target
+          if (target_num==0) {
+            memcpy(cur_input_prefix, lines[i], prefix_len);
+            cur_input_prefix[prefix_len] = '\0';
+          }
           targets[target_num] = cur_target_pos;
           target_num++;
         }
       }
     }
+    write_targets_to_file(targets, target_num, cur_input_prefix, file);
+    
     free(targets);
     free(lines);
     free(file_content);
